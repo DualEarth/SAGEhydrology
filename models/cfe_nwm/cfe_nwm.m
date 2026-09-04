@@ -87,6 +87,7 @@ rho = 0.01;                 % Dimensionless smoothing coefficient
 eps = 5;                    % Dimensionless smoothing coefficient
 fail = false;               % Default: model completes run
 id = m + (1:d)*m;           % Indices of sensitivity state variables
+id_S = 2 + (1:d)*m;         % Same, for soil moisture (state u[1], column 2)
 if mem == 0
     q_n = nan(n,1);
     J = nan(n,d); 
@@ -102,13 +103,15 @@ switch mdl.pspace
     case 0 % hydrologic parameter values
         th = par;
         if (any(th<mdl.th_min) || any(th>mdl.th_max))
-            varargout = {nan(n,1),nan(n,d),nan(d,1),Z}; return
+            varargout = {nan(n,1),nan(n,d),nan(d,1),Z, ...
+                nan(n,1),nan(n,d)}; return
         end
         Jth = ones(d,1);                    % return dq_n/dth
     case 1 % normalized hydrologic parameter values
         nth = par;
         if (any(nth<0) || any(nth>1))
-            varargout = {nan(n,1),nan(n,d),nan(d,1),Z}; return
+            varargout = {nan(n,1),nan(n,d),nan(d,1),Z, ...
+                nan(n,1),nan(n,d)}; return
         end
         dth_dnth = mdl.th_max - mdl.th_min; % dth/dnth
         th = mdl.th_min + nth.*dth_dnth;    % hydrologic parameter values
@@ -351,6 +354,10 @@ switch mcode
                 [~,q_n] = crr_cfe_nwm(mdl.tout,Z(1,1:nvar)',data,ode);
             end
             J = [];
+        elseif nargout >= 5 && mem == 0
+            % Soil moisture requested; core allocates those buffers on nlhs
+            [Z,q_n,J,~,Sm,J_Sm] = ...
+                crr_cfe_nwm(mdl.tout,Z(1,1:nvar)',data,ode);
         else
             [Z,q_n,J] = crr_cfe_nwm(mdl.tout,Z(1,1:nvar)',data,ode);
         end
@@ -364,21 +371,34 @@ end
 if mem == 1
     q_n = diff(Z(mdl.idx(1):mdl.idx(2),m));
     switch nargout
-        case {2,3,4}
+        case {2,3,4,5,6}
             % diff appropriate elements of sensitivity state variables
             J = diff(Z(mdl.idx(1):mdl.idx(2),id));
+   end
+   if nargout >= 5
+       % Soil moisture is a level, so no diff; slice starts one row later
+       rows_S = (mdl.idx(1)+1):mdl.idx(2);
+       Sm = Z(rows_S,2);
+       J_Sm = Z(rows_S,id_S);
    end
 end
 if nargout == 1
     varargout = {q_n}; return
 else
     J = J .* reshape(Jth,1,[]);
+    if nargout >= 5
+        J_Sm = J_Sm .* reshape(Jth,1,[]);   % pspace map, as for J above
+    end
     if nargout == 2
         varargout = {q_n,J}; return
     elseif nargout == 3
         varargout = {q_n,J,Jth}; return
-    else
+    elseif nargout == 4
         varargout = {q_n,J,Jth,Z}; return
+    elseif nargout == 5
+        varargout = {q_n,J,Jth,Z,Sm}; return
+    else
+        varargout = {q_n,J,Jth,Z,Sm,J_Sm}; return
     end
 end
 
