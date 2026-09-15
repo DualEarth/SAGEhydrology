@@ -361,11 +361,19 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
     % ---------------------------------------
     % Soil moisture: L = ell_q + lambda*ell_Sm
     % ---------------------------------------
-    delta_sm_v = [];
+    delta_sm_v = []; add_sm = false;
     if use_sm
         [loss_sm,delta_sm_v] = delta_sm(Sm_t,sm_t);
-        if isfinite(loss_value) && isfinite(loss_sm)
+        % One flag drives both the loss and the gradient: including the
+        % term in one but not the other would hand the optimiser a finite
+        % loss with a non-finite gradient.
+        add_sm = isfinite(loss_sm) && all(isfinite(delta_sm_v));
+        if add_sm && isfinite(loss_value)
             loss_value = loss_value + lambda*loss_sm;
+        elseif ~add_sm
+            warning('crr_model:SoilMoistureSkipped', ...
+                ['Soil-moisture term skipped: loss or gradient is not ' ...
+                 'finite. Check sd_obs and the mask for this basin.']);
         end
     end
 
@@ -392,7 +400,7 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
                     y_t,q_t,args{:});
             end
             g = J' * delta;
-            if use_sm
+            if add_sm
                 % both Jacobians already carry the pspace map, so the two
                 % contributions are directly additive
                 g = g + lambda*(J_Sm' * delta_sm_v);
@@ -462,7 +470,15 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
         out.metrics = met;
     end
     if request.attribution
-        [At,An] = sage_attribution(J,delta,mdl,g);
+        % Attribute the objective actually being optimised. Both terms are
+        % included, stacked as extra rows
+        if add_sm
+            Jc = [J; lambda*J_Sm];
+            dc = [delta; delta_sm_v];
+        else
+            Jc = J; dc = delta;
+        end
+        [At,An] = sage_attribution(Jc,dc,mdl,g);
         out.attribution = struct('total',At,'net',An);
     end
 end

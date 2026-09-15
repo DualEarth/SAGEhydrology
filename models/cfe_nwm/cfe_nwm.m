@@ -72,6 +72,10 @@ if mcode == 2 && mem == 0
         'states: mem = 1'])
     mem = 1;
 end
+if nargout >= 5 && mcode ~= 4 && mem == 0
+    % Only the C++ core streams Sm/J_Sm
+    mem = 1;
+end
 T_sm = 1.0;                 % smoothing width (°C) partition/positive-part
 eps_m = 1e-6;               % smoothing for min()
 K = 3;                      % # Nash stores for routing
