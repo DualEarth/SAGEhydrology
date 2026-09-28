@@ -130,11 +130,25 @@ def granules(day, version):
     return [best[t] for t in sorted(best)]
 
 
+def open_h5(g):
+    """Open the granule's .h5 file. From 2026-01-20 granules also list a .qa
+    and an .iso.xml file, which earthaccess opens as well; close those."""
+    handles = earthaccess.open([g], show_progress=False)
+    h5 = [h for h in handles if str(h.path).endswith('.h5')]
+    for h in handles:
+        if not (h5 and h is h5[0]):
+            h.close()
+    if len(h5) != 1:
+        raise ValueError(f"expected one .h5 file in {g['umm']['GranuleUR']}, "
+                         f'found {len(h5)}')
+    return h5[0]
+
+
 def read(g, lat, lon):
     """Stream one granule and sample both layers at every gauge."""
     for attempt in range(3):
         try:
-            remote = earthaccess.open([g], show_progress=False)[0]
+            remote = open_h5(g)
             with closing(remote), h5py.File(remote, 'r') as hdf:
                 rows, cols = cells(hdf, lat, lon)
                 return {k: sample(hdf['Geophysical_Data'][layer], rows, cols)
