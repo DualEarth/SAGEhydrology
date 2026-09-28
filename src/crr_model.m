@@ -72,6 +72,9 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
 %                  3 = long-term mean
 %                  4 = monthly climatology
 %    .meta       metadata structure [method = 4]
+%    .lambda     OPTIONAL weight on the soil-moisture objective
+%                 L = ell_q + lambda*ell_Sm, see delta_sm. Requires
+%                 dat.sm and cfe_nwm (model 7); 0 or absent disables it
 %   request     logical output-selection structure
 %    .q          return simulated discharge
 %    .gradient   return the loss gradient
@@ -119,6 +122,19 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
     model = mdl.model;                  % choice of model [= integer]
     loss_fnc = loss.fnc;                % loss function [= integer]
     
+    % Optional soil-moisture objective: L = ell_q + lambda*ell_Sm. Inactive
+    % unless both a positive lambda and a dat.sm target are present, so
+    % lambda = 0 takes the discharge-only path unchanged.
+    lambda = 0; Sm = []; J_Sm = [];
+    if isfield(loss,'lambda') && ~isempty(loss.lambda)
+        lambda = loss.lambda;
+    end
+    use_sm = (lambda > 0) && isfield(dat,'sm') && ~isempty(dat.sm);
+    if use_sm && model ~= 7
+        error(['      Error:crr_model: loss.lambda > 0 is implemented ' ...
+            'for cfe_nwm (model 7) only; got model %d.'],model);
+    end
+
     needGradient = request.gradient ...
         || request.attribution;
     needJ = request.jacobian ...
@@ -180,7 +196,9 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
                 q = hbv(x,mdl,dat.meteo,ode_model);
             end
         case 7
-            if needStates
+            if use_sm
+                [q,J,~,Z,Sm,J_Sm] = cfe_nwm(x,mdl,dat.meteo,ode_model);
+            elseif needStates
                 [q,J,~,Z] = cfe_nwm(x,mdl,dat.meteo,ode_model);
             elseif needJ
                 [q,J] = cfe_nwm(x,mdl,dat.meteo,ode_model);
@@ -219,6 +237,14 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
     % ----------------------------
     if needJ
         J = J(id_tr,1:d);               % Jacobian on training mask only
+    end
+    if use_sm
+        % Soil moisture uses its own mask: discharge and soil-moisture
+        % validity need not coincide
+        id_sm = id_tra(~dat.sm.bad(id_tra));
+        Sm_t = Sm(id_sm);
+        J_Sm = J_Sm(id_sm,1:d);
+        sm_t = dat.sm; sm_t.y = dat.sm.y(id_sm);
     end
     y_t = dat.y_n(id_tr);               % nx1 observed discharge, training
     q_t = q(id_tr);                     % nx1 simulated discharge, training
@@ -332,6 +358,25 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
         end
     end
 
+    % ---------------------------------------
+    % Soil moisture: L = ell_q + lambda*ell_Sm
+    % ---------------------------------------
+    delta_sm_v = []; add_sm = false;
+    if use_sm
+        [loss_sm,delta_sm_v] = delta_sm(Sm_t,sm_t);
+        % One flag drives both the loss and the gradient: including the
+        % term in one but not the other would hand the optimiser a finite
+        % loss with a non-finite gradient.
+        add_sm = isfinite(loss_sm) && all(isfinite(delta_sm_v));
+        if add_sm && isfinite(loss_value)
+            loss_value = loss_value + lambda*loss_sm;
+        elseif ~add_sm
+            warning('crr_model:SoilMoistureSkipped', ...
+                ['Soil-moisture term skipped: loss or gradient is not ' ...
+                 'finite. Check sd_obs and the mask for this basin.']);
+        end
+    end
+
     % --------------------
     % Gradient computation
     % --------------------
@@ -355,6 +400,11 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
                     y_t,q_t,args{:});
             end
             g = J' * delta;
+            if add_sm
+                % both Jacobians already carry the pspace map, so the two
+                % contributions are directly additive
+                g = g + lambda*(J_Sm' * delta_sm_v);
+            end
         end
     end
     % ----------------
@@ -420,7 +470,15 @@ function [loss_value,out] = crr_model(x,mdl,dat,ode,loss,request)
         out.metrics = met;
     end
     if request.attribution
-        [At,An] = sage_attribution(J,delta,mdl,g);
+        % Attribute the objective actually being optimised. Both terms are
+        % included, stacked as extra rows
+        if add_sm
+            Jc = [J; lambda*J_Sm];
+            dc = [delta; delta_sm_v];
+        else
+            Jc = J; dc = delta;
+        end
+        [At,An] = sage_attribution(Jc,dc,mdl,g);
         out.attribution = struct('total',At,'net',An);
     end
 end

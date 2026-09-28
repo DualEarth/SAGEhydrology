@@ -1107,6 +1107,19 @@ bool run_into(int ns,
                             zcur[idx] - prev[idx];
                     }
                 }
+
+                //Soil moisture, physical state u[1]
+                if (out.sm) {
+                    out.sm[k_out] = zcur[1];
+                    if (out.Jsm) {
+                        for (int j = 0; j < d; ++j) {
+                            const int idxS = m + m * j + 1;
+                            out.Jsm[(std::size_t)k_out + (std::size_t)n_q * j] =
+                                zcur[idxS];
+                        }
+                    }
+                }
+
                 ++k_out;
             }
             std::copy(zcur.begin(), zcur.end(), prev.begin());

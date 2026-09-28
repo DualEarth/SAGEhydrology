@@ -56,6 +56,9 @@ struct OutputView {
     double* q = nullptr;
     double* J = nullptr;
     std::size_t zrows = 0, zcols = 0, nq = 0, nj = 0;
+    //Optional soil-moisture outputs, for multi-objective training. 
+    double* sm = nullptr;
+    double* Jsm = nullptr;
 };
 
 bool run_into(int ns,

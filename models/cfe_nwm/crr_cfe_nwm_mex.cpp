@@ -64,8 +64,8 @@ InputVector vector_view(const mxArray* a, const char* n)
 
 void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
 {
-    if (nrhs != 4 || nlhs > 4) {
-        mexErrMsgIdAndTxt("crr_cfe_nwm:Usage", "Need t_last,z0,data,options; <=4 outputs.");
+    if (nrhs != 4 || nlhs > 6) {
+        mexErrMsgIdAndTxt("crr_cfe_nwm:Usage", "Need t_last,z0,data,options; <=6 outputs.");
     }
     const int ns = (int)std::llround(mxGetScalar(prhs[0]));
     const mxArray* data = prhs[2];
@@ -147,8 +147,27 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[])
             J = mxGetPr(plhs[2]);
         }
     }
+    /* Outputs 5 and 6: soil moisture and d(soil moisture)/d(theta), for
+     * multi-objective training. Allocated on the same terms as q and J */
+    double *sm = nullptr, *Jsm = nullptr;
+    if (nlhs >= 5) {
+        plhs[4] = (!mem && nq) ? mxCreateDoubleMatrix((mwSize)nq, 1, mxREAL)
+                               : mxCreateDoubleMatrix(0, 0, mxREAL);
+        if (nq) {
+            sm = mxGetPr(plhs[4]);
+        }
+    }
+    if (nlhs >= 6) {
+        plhs[5] = (!mem && nq) ? mxCreateDoubleMatrix((mwSize)nq, d, mxREAL)
+                               : mxCreateDoubleMatrix(0, 0, mxREAL);
+        if (nq) {
+            Jsm = mxGetPr(plhs[5]);
+        }
+    }
     sage_cfe_nwm::Forcing F{P.ptr, Ep.ptr, T.ptr, std::min(P.n, std::min(Ep.n, T.n))};
     sage_cfe_nwm::OutputView O{mxGetPr(plhs[0]), q, J, zr, nvar, nq, (std::size_t)d};
+    O.sm = sm;
+    O.Jsm = Jsm;
     bool fail =
         sage_cfe_nwm::run_into(ns, z0.ptr, z0.n, F, p, opt, mem != 0, ipr, nlhs >= 3, O);
     if (nlhs >= 4) {
