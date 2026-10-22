@@ -75,9 +75,14 @@ end
 function S = local_meteo_schema()
     S.name = 'daily MACH-US';
     S.format = 'csv';
-    S.layout = 'one_file_per_basin';
-    S.file.pattern = 'basin_{gauge}_MACH.csv';
-    S.file.delimiter = ',';
+    % Two files per basin: the MACH time series and the SMAP L4 soil
+    % moisture extracted at the gauge (smap/smap_<gauge>.csv; basins
+    % without SMAP carry -9999 and train on discharge only).
+    S.layout = 'multi_file_per_basin';
+    S.files.ts.pattern = 'basin_{gauge}_MACH.csv';
+    S.files.ts.delimiter = ',';
+    S.files.smap.pattern = fullfile('smap','smap_{gauge}.csv');
+    S.files.smap.delimiter = ',';
     S.id.pad_width = 8;
     S.timeline.reference = datetime(1950,10,1);
     S.timeline.step = days(1);
@@ -95,6 +100,18 @@ function S = local_meteo_schema()
     S.variables.SWE.source_description = 'MACH-US Daymet V4 SWE';
     S.variables.SWE.clip_min = 0;
     S.variables.Q = local_variable('OBSQ','mm/day','mm/day');
+    % SMAP L4 root-zone soil moisture (0-100 cm, m3/m3) as stored water
+    % depth: 1 m3/m3 over 1000 mm of soil = 1000 mm.
+    S.variables.SM = local_variable('l4_root','m3/m3','mm');
+    S.variables.SM.file = 'smap';
+    S.variables.SM.valid_min = 0;
+    S.variables.SM.valid_max = 1;
+    S.variables.SM.scale = 1000;
+    S.variables.SM.source_description = ...
+        'SMAP L4 root-zone soil moisture (SPL4SMGP.008), 0-100 cm';
+    for v = {'P','Ep','T','SWE','Q'}
+        S.variables.(v{1}).file = 'ts';
+    end
     S.reuse_existing_q = true;
     S.progress.label = '... Reading daily MACH-US generic data';
 end
