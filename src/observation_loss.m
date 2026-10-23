@@ -25,6 +25,9 @@ function [value,gradient,detail] = ...
 % NOTES:
 %   Missing observations are excluded using indices from PREP_STATS. The
 %   gradient is J'*(dL/dsim) in the same parameter space as J.
+%   With loss.transform.<name> = 'zscore' (see LOSS_TRANSFORM), the
+%   observation is scored as mean((z_sim - z_obs).^2) = 2(1 - r) on the
+%   period's valid days instead of with loss.fnc.
 %
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % © Written by Jasper A. Vrugt, Sep. 2026                                 %
@@ -73,7 +76,8 @@ function [value,gradient,detail] = ...
         'JKGE',NaN, ...
         'JKGE_M',NaN, ...
         'JKGE_V',NaN, ...
-        'JKGE_C',NaN);
+        'JKGE_C',NaN, ...
+        'transform','none');
 
     if ~isfield(dat,'obs') ...
             || ~isfield(dat.obs,field) ...
@@ -160,7 +164,16 @@ function [value,gradient,detail] = ...
         end
     end
 
+    transform = loss_transform(loss,field);
+    detail.transform = transform;
+    if strcmp(transform,'zscore')
+        fnc = 0; % standardized loss replaces loss.fnc for this observation
+        [value,delta] = local_zscore_loss(yt,qt);
+    end
+
     switch fnc
+        case 0
+
         case 1
             value = sum(abs(res));
             delta = delta_n(1,yt,qt);
@@ -267,6 +280,33 @@ function [value,gradient,detail] = ...
         detail.n = numel(id);
         detail.available = all(isfinite(gradient));
     end
+end
+
+function [value,delta] = local_zscore_loss(y,q)
+%LOCAL_ZSCORE_LOSS Squared error of standardized series and its gradient.
+%
+% With population standard deviations, L = mean((z_q - z_y).^2) = 2(1-r).
+% The simulated mean and standard deviation depend on q, so with
+% g = dL/dz_q the chain rule gives
+%   dL/dq = (g - mean(g) - z_q*mean(z_q.*g))/s_q.
+
+    value = NaN;
+    delta = [];
+    n = numel(y);
+    if n < 2
+        return
+    end
+    sy = std(y,1);
+    sq = std(q,1);
+    if ~(sy > 0) ...
+            || ~(sq > 0)
+        return
+    end
+    zy = (y-mean(y))/sy;
+    zq = (q-mean(q))/sq;
+    value = mean((zq-zy).^2);
+    g = 2*(zq-zy)/n;
+    delta = (g-mean(g)-zq*mean(zq.*g))/sq;
 end
 
 function value = local_jkge_data(dat,field)

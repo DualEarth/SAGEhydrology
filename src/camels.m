@@ -2137,6 +2137,12 @@ function scales = local_benchmark_loss_scales(loss,dat,Kt,names)
                     || ~dat{k}.stats.(field).train.has_data
                 continue
             end
+            if strcmp(loss_transform(loss,field),'zscore')
+                % A constant simulation has no correlation; score the
+                % benchmark as r = 0, i.e. 2(1 - r) = 2.
+                raw(j,k) = 2;
+                continue
+            end
             y = dat{k}.obs.(field).value(:);
             mu = dat{k}.stats.(field).train.mean;
             sim = repmat(mu,numel(y),1);
