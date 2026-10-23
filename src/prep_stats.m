@@ -17,6 +17,7 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss,progressFcn)
 %   loss            selected loss and observation settings
 %    .fnc            loss-function identifier
 %    .observed       selected Q, SWE, or SM names
+%    .transform      optional per-observation 'none' or 'zscore'
 %    .n_win          JKGE window length in days
 %    .method         JKGE benchmark method (1 to 4)
 %    .fdc            FDC formulation settings
@@ -82,6 +83,16 @@ function [dat,loss] = prep_stats(dat,mdl,split,loss,progressFcn)
             strjoin(cellstr(unknown),', '));
     end
     prepNames = activeNames(:);
+    % Validate loss.transform; z-scoring needs the multi-observation path
+    for j = 1:numel(prepNames)
+        loss_transform(loss,prepNames(j));
+    end
+    if isequal(activeNames,"Q") ...
+            && strcmp(loss_transform(loss,'Q'),'zscore')
+        error('prep_stats:QOnlyTransform', ...
+            ['loss.transform.Q = ''zscore'' requires a multiple-' ...
+             'observation loss (loss.observed with SWE or SM).']);
+    end
     
     global_id_train = [];
     global_id_eval = [];
